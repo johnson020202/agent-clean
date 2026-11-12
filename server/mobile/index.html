@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>Agent Clean · 临时文件墓园</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --card2: #1e222b;
+    --text: #e6e8ee;
+    --muted: #8b93a3;
+    --accent: #4f8cff;
+    --danger: #ff5f56;
+    --ok: #3ecf8e;
+    --border: #262b36;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    padding: 16px 14px calc(28px + env(safe-area-inset-bottom));
+    max-width: 640px;
+    margin: 0 auto;
+    -webkit-tap-highlight-color: transparent;
+  }
+  header h1 { font-size: 21px; letter-spacing: .5px; }
+  header p { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+  .token-bar {
+    display: flex; gap: 8px; margin: 14px 0;
+  }
+  .token-bar input {
+    flex: 1; background: var(--card); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; font-size: 14px; outline: none;
+  }
+  .token-bar input:focus { border-color: var(--accent); }
+
+  .chips { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+  .chip {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 8px 14px; font-size: 13px; color: var(--muted);
+  }
+  .chip b { color: var(--text); font-size: 17px; display: block; }
+
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 18px; }
+  button {
+    border: none; border-radius: 12px; padding: 11px 16px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    background: var(--card2); color: var(--text);
+    transition: opacity .15s;
+  }
+  button:active { opacity: .7; }
+  button.primary { background: var(--accent); color: #fff; }
+  button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+  button.small { padding: 7px 12px; font-size: 13px; }
+
+  h2 { font-size: 15px; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
+
+  .item {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px;
+  }
+  .item .path {
+    word-break: break-all; font-size: 13px; color: var(--text);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .item .meta {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 8px; gap: 8px; flex-wrap: wrap;
+  }
+  .item .meta .info { color: var(--muted); font-size: 12px; }
+  .badge {
+    display: inline-block; border-radius: 8px; padding: 2px 8px;
+    font-size: 11px; background: var(--card2); color: var(--muted);
+  }
+  .badge.warn { color: var(--danger); }
+
+  #msg {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    background: var(--card2); border: 1px solid var(--border);
+    padding: 10px 18px; border-radius: 999px; font-size: 13px;
+    opacity: 0; pointer-events: none; transition: opacity .25s;
+    max-width: 90vw; text-align: center;
+  }
+  #msg.show { opacity: 1; }
+  .empty { color: var(--muted); font-size: 13px; padding: 10px 2px; }
+  footer { color: var(--muted); font-size: 11px; margin-top: 26px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Agent Clean</h1>
+  <p>AI 临时文件墓园 · 到期下葬，7 天内可复活，绝不 rm -rf</p>
+</header>
+
+<div class="token-bar">
+  <input id="token" type="text" placeholder="访问令牌（启动服务时打印）" autocomplete="off">
+  <button class="primary" onclick="saveToken()">保存</button>
+</div>
+
+<div class="chips">
+  <div class="chip"><b id="c-alive">–</b>在册</div>
+  <div class="chip"><b id="c-buried">–</b>墓地</div>
+  <div class="chip"><b id="c-size">–</b>墓地占用</div>
+</div>
+
+<div class="actions">
+  <button class="primary" onclick="doReap()">触发收割 reap</button>
+  <button onclick="doResurrectLast()">复活最近一条</button>
+  <button onclick="loadState()">刷新</button>
+</div>
+
+<h2>在册条目</h2>
+<div id="alive"><div class="empty">加载中…</div></div>
+
+<h2>墓地 <button class="small" onclick="toggleGrave()" id="grave-toggle">查看墓地</button></h2>
+<div id="grave" style="display:none"><div class="empty">加载中…</div></div>
+
+<div class="actions" id="grave-actions" style="display:none">
+  <button class="danger" onclick="doPurge()">火化超期墓地（保留 7 天）</button>
+</div>
+
+<footer>Agent Clean · 纯本地服务，数据不出设备</footer>
+<div id="msg"></div>
+
+<script>
+'use strict';
+let TOKEN = '';
+
+function $(id) { return document.getElementById(id); }
+
+function showMsg(text, ok) {
+  const el = $('msg');
+  el.textContent = text;
+  el.style.borderColor = ok ? 'var(--ok)' : 'var(--danger)';
+  el.classList.add('show');
+  clearTimeout(showMsg._t);
+  showMsg._t = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+function saveToken() {
+  TOKEN = $('token').value.trim();
+  try { localStorage.setItem('ac_token', TOKEN); } catch (e) {}
+  showMsg('令牌已保存', true);
+  loadState();
+}
+
+function initToken() {
+  const q = new URLSearchParams(location.search);
+  if (q.get('token')) {
+    TOKEN = q.get('token');
+    try { localStorage.setItem('ac_token', TOKEN); } catch (e) {}
+  } else {
+    try { TOKEN = localStorage.getItem('ac_token') || ''; } catch (e) {}
+  }
+  $('token').value = TOKEN;
+}
+
+async function api(path, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({
+    'Authorization': 'Bearer ' + TOKEN,
+    'Content-Type': 'application/json'
+  }, opts.headers || {});
+  const res = await fetch(path, opts);
+  const data = await res.json();
+  if (!res.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+async function loadState() {
+  if (!TOKEN) { $('alive').innerHTML = '<div class="empty">请先填写访问令牌</div>'; return; }
+  try {
+    const st = await api('/api/state');
+    $('c-alive').textContent = st.stats.alive;
+    $('c-buried').textContent = st.stats.buried;
+    $('c-size').textContent = humanSize(st.stats.graveyard_bytes);
+
+    const aliveEl = $('alive');
+    if (!st.items.length) {
+      aliveEl.innerHTML = '<div class="empty">没有在册条目</div>';
+    } else {
+      aliveEl.innerHTML = st.items.map(i => `
+        <div class="item">
+          <div class="path">#${i.id} ${esc(i.path)}</div>
+          <div class="meta">
+            <span class="info">
+              <span class="badge${i.left === '已到期' ? ' warn' : ''}">${esc(i.left)}</span>
+              ${i.reason ? ' · ' + esc(i.reason) : ''}
+            </span>
+            <button class="small danger" onclick="doBury(${i.id})">立即下葬</button>
+          </div>
+        </div>`).join('');
+    }
+
+    const graveEl = $('grave');
+    if (!st.graveyard.length) {
+      graveEl.innerHTML = '<div class="empty">墓地是空的</div>';
+    } else {
+      graveEl.innerHTML = st.graveyard.map(g => `
+        <div class="item">
+          <div class="path">#${g.id} ${esc(g.path)}</div>
+          <div class="meta">
+            <span class="info">${esc(fmtTime(g.buried_at))} 下葬 · 剩 ${esc(g.left)} 火化</span>
+            <button class="small" onclick="doResurrect(${g.id})">复活</button>
+          </div>
+        </div>`).join('');
+    }
+  } catch (e) {
+    showMsg('加载失败：' + e.message, false);
+  }
+}
+
+async function doBury(id) {
+  try {
+    const r = await api('/api/bury', { method: 'POST', body: JSON.stringify({ target: id }) });
+    showMsg(r.ok ? '#' + id + ' 已下葬' : '未下葬：' + (r.item && r.item.note || ''), r.ok);
+    loadState();
+  } catch (e) { showMsg(e.message, false); }
+}
+
+async function doResurrect(id) {
+  try {
+    const r = await api('/api/resurrect', { method: 'POST', body: JSON.stringify({ target: id }) });
+    showMsg('#' + id + ' 已复活 → ' + r.path, true);
+    loadState();
+  } catch (e) { showMsg(e.message, false); }
+}
+
+async function doResurrectLast() {
+  try {
+    const r = await api('/api/resurrect', { method: 'POST', body: JSON.stringify({ last: true }) });
+    showMsg('已复活 → ' + r.path, true);
+    loadState();
+  } catch (e) { showMsg(e.message, false); }
+}
+
+async function doReap() {
+  try {
+    const r = await api('/api/reap', { method: 'POST', body: '{}' });
+    showMsg('下葬 ' + r.results.filter(x => x.ok).length + ' 项，腾出 ' + r.freed_human, true);
+    loadState();
+  } catch (e) { showMsg(e.message, false); }
+}
+
+async function doPurge() {
+  try {
+    const r = await api('/api/purge', { method: 'POST', body: JSON.stringify({ keep: '7d' }) });
+    showMsg('火化 ' + r.purged + ' 项，释放 ' + r.freed_human, true);
+    loadState();
+  } catch (e) { showMsg(e.message, false); }
+}
+
+function toggleGrave() {
+  const el = $('grave');
+  const show = el.style.display === 'none';
+  el.style.display = show ? '' : 'none';
+  $('grave-actions').style.display = show ? '' : 'none';
+  $('grave-toggle').textContent = show ? '收起墓地' : '查看墓地';
+}
+
+function humanSize(n) {
+  const units = ['B', 'K', 'M', 'G'];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n : n.toFixed(1)) + units[i];
+}
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts * 1000);
+  const p = x => String(x).padStart(2, '0');
+  return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+initToken();
+loadState();
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
